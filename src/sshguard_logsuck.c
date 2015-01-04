@@ -87,9 +87,20 @@ static size_t list_meter_sourceentry(const void *el) {
     return sizeof(source_entry_t);
 }
 
+/* seeker for file descriptors for SimCList */
+static int list_seeker_filedescriptor(const void *el, const void *key) {
+    const source_entry_t *elc = (const source_entry_t *)el;
+    assert(el != NULL);
+    assert(key != NULL);
+    return elc->current_descriptor == *(int *)key;
+}
+
 int logsuck_init() {
     list_init(& sources_list);
     list_attributes_copy(& sources_list, list_meter_sourceentry, 1);
+
+    /* will need file descriptor seeker to look up source items from fds */
+    list_attributes_seeker(& sources_list, list_seeker_filedescriptor);
     return 0;
 }
 

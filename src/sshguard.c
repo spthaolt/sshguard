@@ -82,10 +82,6 @@ static inline void attackerinit(attacker_t *restrict ipe, const attack_t *restri
 /* comparison operator for sorting offenders list */
 static int attackt_whenlast_comparator(const void *a, const void *b);
 
-#ifdef EINTR
-/* get line unaffected by interrupts */
-static char *safe_fgets(char *restrict s, int size, FILE *restrict stream);
-#endif
 /* handler for termination-related signals */
 static void sigfin_handler(int signo);
 /* handler for suspension/resume signals */
@@ -205,25 +201,6 @@ int main(int argc, char *argv[]) {
             opts.abuse_threshold, (unsigned int)opts.pardon_threshold);
     ev_run(EV_DEFAULT, 0);
 }
-
-#ifdef EINTR
-static char *safe_fgets(char *restrict s, int size, FILE *restrict stream) {
-    char *restrict ret;
-
-    do {
-        clearerr(stream);
-        ret = fgets(s, size, stream);
-        if (ret != NULL)
-            return s;
-        if (errno != EINTR)
-            return NULL;
-    } while (ret == NULL && errno == EINTR);
-
-    /* pretend we arrive here to make compiler happy */
-    return NULL;
-}
-#endif
-
 
 /*
  * This function is called every time an attack pattern is matched.

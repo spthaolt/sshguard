@@ -162,6 +162,7 @@ AM_PROG_LEX
 
 ##############################################################################
 AS_BOX([Library Checks])
+AC_SEARCH_LIBS(ev_run, ev, [], [AC_MSG_ERROR([Requires libev])])
 
 # Header Files
 AC_HEADER_STDC

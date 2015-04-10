@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
-#include <pthread.h>
 #include <signal.h>
 #include <assert.h>
 
@@ -79,10 +78,6 @@ list_t hell;
 /* list of offenders (addresses already blocked in the past) */
 list_t offenders;
 
-/* mutex against races between insertions and pruning of lists */
-pthread_mutex_t list_mutex;
-
-
 /* fill an attacker_t structure for usage */
 static inline void attackerinit(attacker_t *restrict ipe, const attack_t *restrict attack);
 /* comparison operator for sorting offenders list */
@@ -108,8 +103,7 @@ static void process_blacklisted_addresses();
 static void report_address(attack_t attack);
 /* cleanup false-alarm attackers from limbo list (ones with too few attacks in too much time) */
 static void purge_limbo_stale(void);
-/* release blocked attackers after their penalty expired */
-static void *pardonBlocked(void *par);
+static void pardonBlocked(void);
 
 /* create or destroy my own pidfile */
 static int my_pidfile_create();
@@ -117,7 +111,6 @@ static void my_pidfile_destroy();
 
 
 int main(int argc, char *argv[]) {
-    pthread_t tid;
     int retv;
     sourceid_t source_id;
     char buf[MAX_LOGLINE_LEN];
@@ -137,8 +130,6 @@ int main(int argc, char *argv[]) {
     list_init(&offenders);
     list_attributes_seeker(& offenders, seeker_addr);
     list_attributes_comparator(& offenders, attackt_whenlast_comparator);
-    pthread_mutex_init(& list_mutex, NULL);
-
 
     /* logging system */
     sshguard_log_init(sshg_debugging);
@@ -204,13 +195,6 @@ int main(int argc, char *argv[]) {
 
     /* load blacklisted addresses and block them (if requested) */
     process_blacklisted_addresses();
-
-    
-    /* start thread for purging stale blocked addresses */
-    if (pthread_create(&tid, NULL, pardonBlocked, NULL) != 0) {
-        perror("pthread_create()");
-        exit(2);
-    }
 
 
     /* initialization successful */
@@ -304,9 +288,7 @@ static void report_address(attack_t attack) {
     purge_limbo_stale();
 
     /* address already blocked? (can happen for 100 reasons) */
-    pthread_mutex_lock(& list_mutex);
     tmpent = list_seek(& hell, & attack.address);
-    pthread_mutex_unlock(& list_mutex);
     if (tmpent != NULL) {
         sshguard_log(LOG_INFO, "Asked to block '%s', which was already blocked to my account.", attack.address.value);
         return;
@@ -407,9 +389,7 @@ static void report_address(attack_t attack) {
     if (ret != FWALL_OK) sshguard_log(LOG_ERR, "Blocking command failed. Exited: %d", ret);
 
     /* append blocked attacker to the blocked list, and remove it from the pending list */
-    pthread_mutex_lock(& list_mutex);
     list_append(& hell, tmpent);
-    pthread_mutex_unlock(& list_mutex);
     assert(list_locate(& limbo, tmpent) >= 0);
     list_delete_at(& limbo, list_locate(& limbo, tmpent));
 }
@@ -439,44 +419,40 @@ static void purge_limbo_stale(void) {
     }
 }
 
-static void *pardonBlocked(void *par) {
+/**
+ * Unblock attackers whose timeouts have elapsed.
+ */
+static void pardonBlocked() {
     time_t now;
     attacker_t *tmpel;
     int ret, pos;
 
+    now = time(NULL);
 
-    while (1) {
-        /* wait some time, at most opts.pardon_threshold/3 + 1 sec */
-        sleep(1 + ((unsigned int)rand() % (1+opts.pardon_threshold/2)));
-        now = time(NULL);
-        pthread_testcancel();
-        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &ret);
-        pthread_mutex_lock(& list_mutex);
+    for (pos = 0; pos < list_size(& hell); pos++) {
+        tmpel = list_get_at(&hell, pos);
 
-        for (pos = 0; pos < list_size(& hell); pos++) {
-            tmpel = list_get_at(&hell, pos);
-            /* skip blacklisted hosts (pardontime = infinite/0) */
-            if (tmpel->pardontime == 0) continue;
-            /* process hosts with finite pardon time */
-            if (now - tmpel->whenlast > tmpel->pardontime) {
-                /* pardon time passed, release block */
-                sshguard_log(LOG_INFO, "Releasing %s after %lld seconds.\n", tmpel->attack.address.value, (long long int)(now - tmpel->whenlast));
-                ret = fw_release(tmpel->attack.address.value, tmpel->attack.address.kind, tmpel->attack.service);
-                if (ret != FWALL_OK) sshguard_log(LOG_ERR, "Release command failed. Exited: %d", ret);
-                list_delete_at(&hell, pos);
-                free(tmpel);
-                /* element removed, next element is at current index (don't step pos) */
-                pos--;
-            }
+        /* skip blacklisted hosts (pardontime = infinite/0) */
+        if (tmpel->pardontime == 0) {
+            continue;
         }
-        
-        pthread_mutex_unlock(& list_mutex);
-        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &ret);
-        pthread_testcancel();
-    }
 
-    pthread_exit(NULL);
-    return NULL;
+        /* pardon time passed, release block */
+        if (now - tmpel->whenlast > tmpel->pardontime) {
+            sshguard_log(LOG_INFO, "Releasing %s after %lld seconds.\n",
+                    tmpel->attack.address.value,
+                    (long long int)(now - tmpel->whenlast));
+            ret = fw_release(tmpel->attack.address.value,
+                    tmpel->attack.address.kind, tmpel->attack.service);
+            if (ret != FWALL_OK) {
+                sshguard_log(LOG_ERR, "Release command failed. Exited: %d", ret);
+            }
+            list_delete_at(&hell, pos);
+            free(tmpel);
+            /* element removed, next element is at current index (don't step pos) */
+            pos--;
+        }
+    }
 }
 
 /* finalization routine */

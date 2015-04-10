@@ -162,7 +162,6 @@ AM_PROG_LEX
 
 ##############################################################################
 AS_BOX([Library Checks])
-AC_CHECK_LIB(pthread, pthread_create)
 
 # Header Files
 AC_HEADER_STDC

@@ -128,9 +128,6 @@ int get_options_cmdline(int argc, char *argv[]) {
                 break;
 
             case 'l':   /* add source for log sucker */
-                if (! opts.has_polled_files) {
-                    logsuck_init();
-                }
                 if (logsuck_add_logsource(optarg) != 0) {
                     fprintf(stderr, "Unable to poll from '%s'!\n", optarg);
                     return -1;

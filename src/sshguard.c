@@ -155,9 +155,17 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    // Initialize logsuck, which is also used for standard input.
+    logsuck_init();
+
     /* parsing the command line */
     if (get_options_cmdline(argc, argv) != 0) {
         exit(1);
+    }
+
+    // If no log files were given, monitor standard input.
+    if (!opts.has_polled_files) {
+        logsuck_add_logsource("-");
     }
 
     /* create pidfile, if requested */

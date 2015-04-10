@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <assert.h>
 
+#include <ev.h>
 #include <simclist.h>
 
 /* subsystem for parsing log entries, notably parse_line() */
@@ -49,8 +50,6 @@
 #include "sshguard_logsuck.h"
 
 #include "sshguard.h"
-
-#define MAX_LOGLINE_LEN     1000
 
 /* switch from 0 (normal) to 1 (suspended) with SIGTSTP and SIGCONT respectively */
 int suspended = 0;
@@ -83,9 +82,6 @@ static inline void attackerinit(attacker_t *restrict ipe, const attack_t *restri
 /* comparison operator for sorting offenders list */
 static int attackt_whenlast_comparator(const void *a, const void *b);
 
-/* get log lines in here. Hide the actual source and the method. Fill buf up
- * to buflen chars, return 0 for success, -1 for failure */
-static int read_log_line(char *restrict buf, size_t buflen, bool from_last_source, sourceid_t *restrict source_id);
 #ifdef EINTR
 /* get line unaffected by interrupts */
 static char *safe_fgets(char *restrict s, int size, FILE *restrict stream);
@@ -99,8 +95,7 @@ static void finishup(void);
 
 /* load blacklisted addresses and block them (if blacklist enabled) */
 static void process_blacklisted_addresses();
-/* handle an attack: addr is the author, addrkind its address kind, service the attacked service code */
-static void report_address(attack_t attack);
+
 /* cleanup false-alarm attackers from limbo list (ones with too few attacks in too much time) */
 static void purge_limbo_stale(void);
 static void pardonBlocked(void);
@@ -109,11 +104,15 @@ static void pardonBlocked(void);
 static int my_pidfile_create();
 static void my_pidfile_destroy();
 
+/**
+ * Timer event callback, called periodically to release blocked addresses.
+ */
+static void event_timer(EV_P_ ev_timer *w, int revents) {
+    pardonBlocked();
+}
 
 int main(int argc, char *argv[]) {
-    int retv;
-    sourceid_t source_id;
-    char buf[MAX_LOGLINE_LEN];
+    ev_timer w_timeout;
     int sshg_debugging;
 
     /* initializations */
@@ -196,57 +195,15 @@ int main(int argc, char *argv[]) {
     /* load blacklisted addresses and block them (if requested) */
     process_blacklisted_addresses();
 
+    ev_timer_init(&w_timeout, event_timer, 0, opts.pardon_threshold / 3);
+    ev_timer_start(EV_DEFAULT, &w_timeout);
+    logsuck_start();
 
     /* initialization successful */
     sshguard_log(LOG_NOTICE,
             "Started with danger threshold=%u ; minimum block=%u seconds",
             opts.abuse_threshold, (unsigned int)opts.pardon_threshold);
-
-    while (read_log_line(buf, MAX_LOGLINE_LEN, false, & source_id) == 0) {
-        attack_t parsed_attack;
-        if (suspended) continue;
-
-        retv = parse_line(source_id, buf, &parsed_attack);
-        if (retv != 0) {
-            /* sshguard_log(LOG_DEBUG, "Skip line '%s'", buf); */
-            continue;
-        }
-
-        /* extract the IP address */
-        sshguard_log(LOG_DEBUG, "Matched address %s:%d attacking service %d, dangerousness %u.", parsed_attack.address.value, parsed_attack.address.kind, parsed_attack.service, parsed_attack.dangerousness);
-
-        // Do not report if the source is clearly fake.
-        if (parsed_attack.source != 0 && procauth_isauthoritative(
-                    parsed_attack.service, parsed_attack.source) == -1) {
-            sshguard_log(LOG_NOTICE,
-                    "Ignoring message from PID %d for service %d",
-                    parsed_attack.source, parsed_attack.service);
-        } else {
-            report_address(parsed_attack);
-        }
-    }
-
-    /* let exit() call finishup() */
-    exit(0);
-}
-
-static int read_log_line(char *restrict buf, size_t buflen, bool from_last_source, sourceid_t *restrict source_id) {
-    /* must fill buf, and return 0 for success and -1 for error */
-
-    /* get logs from polled files ? */
-    if (opts.has_polled_files) {
-        /* logsuck_getline() reflects the 0/-1 codes already */
-        return logsuck_getline(buf, MAX_LOGLINE_LEN, from_last_source, source_id);
-    }
-
-    /* otherwise, get logs from stdin */
-    if (source_id != NULL) *source_id = 0;
-
-#ifdef EINTR
-    return (safe_fgets(buf, MAX_LOGLINE_LEN, stdin) != NULL ? 0 : -1);
-#else
-    return (fgets(buf, MAX_LOGLINE_LEN, stdin) != NULL ? 0 : -1);
-#endif
+    ev_run(EV_DEFAULT, 0);
 }
 
 #ifdef EINTR
@@ -276,7 +233,7 @@ static char *safe_fgets(char *restrict s, int size, FILE *restrict stream) {
  * 2) block the attacker, if attacks > threshold (abuse)
  * 3) blacklist the address, if the number of abuses is excessive
  */
-static void report_address(attack_t attack) {
+void report_address(attack_t attack) {
     attacker_t *tmpent = NULL;
     attacker_t *offenderent;
     int ret;

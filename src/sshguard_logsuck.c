@@ -32,15 +32,14 @@
 #include <sys/stat.h>
 /* to sleep POSIX-compatibly with select() */
 #include <sys/time.h>
-
+#include <ev.h>
 
 #include "fnv.h"
 #include "simclist.h"
 
+#include "parser.h"
 #include "sshguard.h"
 #include "sshguard_log.h"
-
-
 #include "sshguard_logsuck.h"
 
 
@@ -48,6 +47,7 @@
 #   define STDIN_FILENO     0
 #endif
 
+#define MAX_LOGLINE_LEN     1000
 
 /* factor of growth of the interval between polls while in idle */
 #define     LOGPOLL_INTERVAL_GROWTHFACTOR     0.03
@@ -61,6 +61,7 @@ typedef struct {
     int active;                         /* is the source active? 0/1 */
     int current_descriptor;             /* current file descriptor, if active */
     unsigned long int current_serial_number;          /* current serial number of the source, if active */
+    ev_io w;
 } source_entry_t;
 
 /* list of source_entry_t elements */
@@ -72,7 +73,6 @@ static int num_sources_active = 0;
 /* index of last file polled (used if insisting on source is required) */
 static int index_last_read = -1;
 
-
 /* read a line from a file descriptor into a buffer */
 static int read_from(const source_entry_t *restrict source, char *restrict buf, size_t buflen);
 static void deactivate_source(source_entry_t *restrict s);
@@ -81,6 +81,10 @@ static void deactivate_source(source_entry_t *restrict s);
 static int activate_source(source_entry_t *restrict srcent, const struct stat *fileinfo);
 /* test all sources (active + inactive) for changes, and refresh them if needed */
 static int refresh_files();
+
+/* handle an attack: addr is the author, addrkind its address kind, service the attacked service code */
+extern void report_address(attack_t attack);
+extern int suspended;
 
 /* meter for SimCList */
 static size_t list_meter_sourceentry(const void *el) {
@@ -102,6 +106,32 @@ int logsuck_init() {
     /* will need file descriptor seeker to look up source items from fds */
     list_attributes_seeker(& sources_list, list_seeker_filedescriptor);
     return 0;
+}
+
+/**
+ * Log event callback, called whenever a log file changes.
+ */
+static void event_log(EV_P_ ev_io *w, int revents) {
+    source_entry_t *restrict entry;
+    char buf[MAX_LOGLINE_LEN];
+
+    entry = (source_entry_t *restrict)list_seek(&sources_list, &w->fd);
+    read_from(entry, buf, MAX_LOGLINE_LEN);
+    if (suspended) return;
+
+    if (parse_line(entry->source_id, buf) != 0) {
+        /* sshguard_log(LOG_DEBUG, "Skip line '%s'", buf); */
+        return;
+    }
+
+    /* extract the IP address */
+    sshguard_log(LOG_DEBUG,
+            "Matched address %s:%d attacking service %d, dangerousness %u.",
+            parsed_attack.address.value, parsed_attack.address.kind,
+            parsed_attack.service, parsed_attack.dangerousness);
+
+    /* report IP */
+    report_address(parsed_attack);
 }
 
 int logsuck_add_logsource(const char *restrict filename) {
@@ -152,6 +182,9 @@ int logsuck_add_logsource(const char *restrict filename) {
         lseek(cursource.current_descriptor, 0, SEEK_END); /* safe to fail if file is named pipe */
     }
 
+    // Initialize watcher but do not start it here.
+    ev_io_init(&cursource.w, event_log, cursource.current_descriptor, EV_READ);
+
     /* do add */
     list_append(& sources_list, & cursource);
 
@@ -160,6 +193,15 @@ int logsuck_add_logsource(const char *restrict filename) {
     return 0;
 }
 
+void logsuck_start() {
+    for (int pos = 0; pos < list_size(&sources_list); pos++) {
+        source_entry_t *restrict entry = (source_entry_t *restrict)list_get_at(&sources_list, pos);
+        if (!entry->active) continue;
+        ev_io_start(EV_DEFAULT, &entry->w);
+    }
+}
+
+// TODO: Get rid of this function and move refresh logic to event loop.
 int logsuck_getline(char *restrict buf, size_t buflen, bool from_previous_source, sourceid_t *restrict whichsource) {
     int ret;
     /* use active poll through non-blocking read()s */

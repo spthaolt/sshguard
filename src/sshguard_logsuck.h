@@ -42,6 +42,12 @@ int logsuck_init();
 int logsuck_add_logsource(const char *restrict filename);
 
 /**
+ * Add log watchers to the default event loop. This must happen here because
+ * libev stores global addresses to its watchers.
+ */
+void logsuck_start(void);
+
+/**
  * Get the first whole log line coming from any log file configured.
  *
  * @param from_previous_source  read from the same source of previous message

@@ -16,10 +16,12 @@ AM_CONDITIONAL([DEBUG], [test x$enable_debug = xyes])
 AC_ARG_WITH([firewall], [AS_HELP_STRING([--with-firewall=fw],
             [Firewall backend (one of pf, ipfw, iptables, ipfilter, hosts, aix, or null)])],
 [
- FWALLSDIR="src/fwalls"
+ # Substitute the correct commands into the firewall script.
+ AC_SUBST_FILE([sshg_fw_subr])
+ sshg_fw_subr=src/fwalls/sshg-fw.$withval
+
  case "$withval" in
      aix)
-        cp $FWALLSDIR/command_aix.h $FWALLSDIR/command.h
         useaix=true
         AC_CHECK_PROG([genfiltpath], [genfilt])
         if test x$genfiltpath = x
@@ -33,7 +35,6 @@ AC_ARG_WITH([firewall], [AS_HELP_STRING([--with-firewall=fw],
         usehosts=true
         ;;
      ipfilter)
-        cp $FWALLSDIR/command_ipfilter.h $FWALLSDIR/command.h
         useipfilter=true
         # is ipf in PATH?
         AC_CHECK_PROG([ipfpath], [ipf])
@@ -45,7 +46,6 @@ AC_ARG_WITH([firewall], [AS_HELP_STRING([--with-firewall=fw],
         fi
         ;;
      ipfw)
-        cp $FWALLSDIR/command_ipfw.h $FWALLSDIR/command.h
         useipfw=true
         # is ipfw in PATH ?
         AC_CHECK_PROG([ipfwpath], [ipfw])
@@ -57,7 +57,6 @@ AC_ARG_WITH([firewall], [AS_HELP_STRING([--with-firewall=fw],
         fi
         ;;
      iptables)
-        cp $FWALLSDIR/command_iptables.h $FWALLSDIR/command.h
         useiptables=true
         # is iptables in PATH ?
         AC_CHECK_PROG([iptablespath], [iptables])
@@ -69,7 +68,6 @@ AC_ARG_WITH([firewall], [AS_HELP_STRING([--with-firewall=fw],
         fi
         ;;
      pf)
-        cp $FWALLSDIR/command_pf.h $FWALLSDIR/command.h
         usepf=true
         # is pfctl in PATH ?
         AC_CHECK_PROG([pfctlpath], [pfctl])
@@ -81,7 +79,6 @@ AC_ARG_WITH([firewall], [AS_HELP_STRING([--with-firewall=fw],
         fi
         ;;
      null)
-        cp $FWALLSDIR/command_null.h $FWALLSDIR/command.h
         usenull=true
         ;;
      *)
@@ -176,39 +173,24 @@ AC_SEARCH_LIBS([socket], [socket])
 AC_SEARCH_LIBS([gethostbyname], [nsl])
 
 # set what firewall backend has been used, for automake
-# AIX chosen
-AM_CONDITIONAL(FWALL_AIX, test x$useaix = xtrue)
 # HOSTS chosen
 AM_CONDITIONAL(FWALL_HOSTS, test x$usehosts = xtrue)
-# IPF chosen
-AM_CONDITIONAL(FWALL_IPFILTER, test x$useipfilter = xtrue)
-# IPFW chosen
-AM_CONDITIONAL(FWALL_IPFW, test x$useipfw = xtrue)
-# IPTABLES chosen
-AM_CONDITIONAL(FWALL_IPTABLES, test x$useiptables = xtrue)
-# PF chosen
-AM_CONDITIONAL(FWALL_PF, test x$usepf = xtrue)
-# NULL chosen
-AM_CONDITIONAL(FWALL_NULL, test x$usenull = xtrue)
 
-# define $genfiltpath in config.h
-AC_DEFINE_UNQUOTED(FILT_PATH, "$genfiltpath", [path for the genfilt command])
-# define $hostsfilepath in config.h
-AC_DEFINE_UNQUOTED(HOSTSFILE_PATH, "$hostsfilepath", [file for /etc/hosts.allow])
+AC_DEFINE_UNQUOTED([PREFIX], "$prefix", [Prefix])
+
+AC_DEFINE_UNQUOTED(FILT_PATH, "$genfiltpath", [Path to genfilt])
+AC_DEFINE_UNQUOTED(HOSTSFILE_PATH, "$hostsfilepath", [Path to hosts.allow])
+AC_DEFINE_UNQUOTED(IPFPATH, "$ipfpath", [Path to ipf])
+AC_DEFINE_UNQUOTED(IPFW_PATH, "$ipfwpath", [Path to ipfw])
+AC_DEFINE_UNQUOTED(IPTABLES_PATH, "$iptablespath", [Path to iptables])
+AC_DEFINE_UNQUOTED(PFCTL_PATH, "$pfctlpath", [Path to pfctl])
+
 # define $ipfconf as ipfilter configuration filename in config.h
 AC_DEFINE_UNQUOTED(IPFILTER_CONFFILE, "$ipfconf", [filename of the ipfilter configuration file])
-# define $ipfwpath in config.h
-AC_DEFINE_UNQUOTED(IPFW_PATH, "$ipfwpath", [path for the ipfw command])
-# define $iptablespath in config.h
-AC_DEFINE_UNQUOTED(IPTABLES_PATH, "$iptablespath", [path for the iptables command])
-# define $ipfpath in config.h
-AC_DEFINE_UNQUOTED(IPFPATH, "$ipfpath", [path for the ipf command])
-# define $pfctlpath in config.h
-AC_DEFINE_UNQUOTED(PFCTL_PATH, "$pfctlpath", [path for the pfctl command])
+
 # define a suitable "grep -E" in config.h
 AC_DEFINE_UNQUOTED(EGREP, $EGREP, [path and filename for a grep tool supporting -E])
 # define a suitable awk
 AC_DEFINE_UNQUOTED(AWK, $AWK, [path and filename for a suitable awk tool])
 
-AC_OUTPUT([Makefile man/Makefile src/Makefile src/parser/Makefile src/fwalls/Makefile])
-
+AC_OUTPUT([Makefile man/Makefile src/Makefile src/parser/Makefile src/fwalls/Makefile src/fwalls/sshg-fw])

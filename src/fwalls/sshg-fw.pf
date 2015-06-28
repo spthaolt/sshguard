@@ -1,0 +1,18 @@
+#!/bin/sh
+fw_init() {
+}
+
+fw_block() {
+    pfctl -Tadd -t sshguard $1
+}
+
+fw_release() {
+    pfctl -Tdel -t sshguard $1
+}
+
+fw_flush() {
+    pfctl -Tflush -t sshguard
+}
+
+fw_fin() {
+}

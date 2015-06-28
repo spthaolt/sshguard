@@ -1,0 +1,18 @@
+#!/bin/sh
+fw_init() {
+}
+
+fw_block() {
+    ipfw table 22 add $1
+}
+
+fw_release() {
+    ipfw table 22 delete $1
+}
+
+fw_flush() {
+    ipfw table 22 flush
+}
+
+fw_fin() {
+}

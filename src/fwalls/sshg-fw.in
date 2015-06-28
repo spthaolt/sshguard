@@ -1,0 +1,19 @@
+#!/bin/sh
+@sshg_fw_subr@
+
+fw_init || exit 1
+
+while [ true ]; do
+    read command address addrtype
+    if [ "$command" == "block" ]; then
+        fw_block $address $addrtype
+    elif [ "$command" == "release" ]; then
+        fw_release $address $addrtype
+    elif [ "$command" == "flush" ]; then
+        fw_flush
+    else
+        break
+    fi
+done
+
+fw_fin || exit 1

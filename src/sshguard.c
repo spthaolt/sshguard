@@ -26,12 +26,12 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "fwalls/fw.h"
 #include "parser/parser.h"
 #include "seekers.h"
 #include "simclist.h"
 #include "sshguard.h"
 #include "sshguard_blacklist.h"
-#include "sshguard_fw.h"
 #include "sshguard_log.h"
 #include "sshguard_logsuck.h"
 #include "sshguard_options.h"

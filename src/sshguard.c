@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/capability.h>
 #include <unistd.h>
 
 #include "fwalls/fw.h"
@@ -158,7 +159,10 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, sigfin_handler);
     atexit(finishup);
 
-    // TODO: Privilege separation goes here!
+    if (cap_enter() != 0) {
+        perror("Could not enter capability mode");
+        exit(EXIT_FAILURE);
+    }
 
     /* whitelist localhost */
     if (whitelist_add("127.0.0.1") != 0) {

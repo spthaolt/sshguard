@@ -1,18 +1,25 @@
 #!/bin/sh
+IPFW_RULE=50000
+IPFW_TABLE=22
+
 fw_init() {
+    ipfw add ${IPFW_RULE} deny ip from table\(${IPFW_TABLE}\) to me
+    return $?
 }
 
 fw_block() {
-    ipfw table 22 add $1
+    ipfw table ${IPFW_TABLE} add $1
 }
 
 fw_release() {
-    ipfw table 22 delete $1
+    ipfw table ${IPFW_TABLE} delete $1
 }
 
 fw_flush() {
-    ipfw table 22 flush
+    ipfw table ${IPFW_TABLE} flush
 }
 
 fw_fin() {
+    ipfw delete ${IPFW_RULE}
+    return $?
 }
